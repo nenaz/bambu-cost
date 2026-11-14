@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Себестоимость печати</title>
+<style>
+:root{color-scheme:light dark;--bg:#eef0f2;--fg:#1b2127;--mut:#65707b;--card:#fff;--line:#d9dee3;--ok:#13795b;--low:#a96400;--bad:#c23a2b;--acc:#1f5f8b;--onacc:#fff}
+@media(prefers-color-scheme:dark){:root{--bg:#12161a;--fg:#e6eaee;--mut:#8f9aa5;--card:#1a2025;--line:#2c353d;--ok:#4cc9a0;--low:#e8ac45;--bad:#f2766a;--acc:#6bb3e3;--onacc:#0b1720}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+header{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 16px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:1}
+header b{margin-right:10px;font-size:16px}
+main{max-width:1040px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:14px;overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:top}
+th{color:var(--mut);font-weight:500;font-size:13px}
+input,select,textarea,button{font:inherit;color:inherit;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 9px}
+button{cursor:pointer}
+button:hover{border-color:var(--acc)}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+button.on{border-color:var(--acc);color:var(--acc);font-weight:600}
+button.p{background:var(--acc);border-color:var(--acc);color:var(--onacc);font-weight:600}
+a{color:var(--acc)}
+small{color:var(--mut)}
+.sw{display:inline-block;width:14px;height:14px;border-radius:50%;border:1px solid var(--line);vertical-align:-2px;margin-right:7px}
+.b{padding:1px 8px;border-radius:99px;font-size:12px;border:1px solid currentColor;white-space:nowrap}
+.ok{color:var(--ok)}.low{color:var(--low)}.bad{color:var(--bad)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;align-items:end}
+.wide{grid-column:1/-1}
+label{display:block;font-size:13px;color:var(--mut)}
+label input,label select,label textarea{width:100%;margin-top:3px;color:var(--fg)}
+textarea{font:13px/1.4 ui-monospace,Consolas,monospace}
+fieldset{border:1px solid var(--line);border-radius:8px;margin:0;padding:12px}
+legend{padding:0 6px;color:var(--mut);font-size:13px}
+h2{font-size:16px;margin:0 0 10px}
+.verdict{font-size:17px;font-weight:600;margin:12px 0}
+</style>
+</head>
+<body>
+<header>
+  <b>Себестоимость печати <small id=ver></small></b>
+  <nav style="display:flex;gap:6px;flex-wrap:wrap">
+    <button data-t="orders" onclick="go('orders')">Заказы</button>
+    <button data-t="spools" onclick="go('spools')">Катушки</button>
+    <button data-t="preflight" onclick="go('preflight')">Проверка перед печатью</button>
+    <button data-t="jobs" onclick="go('jobs')">История</button>
+    <button data-t="settings" onclick="go('settings')">Настройки</button>
+  </nav>
+</header>
+<main></main>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = (n, d = 2) => n == null ? "—" : Number(n).toFixed(d);
+const A = f => Promise.resolve().then(f).catch(e => alert(e.message));
+let token = "";
+try { token = localStorage.getItem("t") || ""; } catch {}
+if (!token) { token = prompt("Токен доступа (поле token в config.json)") || ""; try { localStorage.setItem("t", token); } catch {} }
+
+async function api(path, o = {}) {
+  const r = await fetch("/api" + path, {
+    method: o.method,
+    headers: { Authorization: "Bearer " + token, ...(o.json ? { "Content-Type": "application/json" } : {}), ...o.headers },
+    body: o.json ? JSON.stringify(o.json) : o.body,
+  });
+  if (r.status === 401) { try { localStorage.removeItem("t"); } catch {} location.reload(); }
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || r.status);
+  return d;
+}
+
+const STATUS = { ok: ["в наличии", "ok"], low: ["мало", "low"], empty: ["закончилась", "bad"] };
+const tabs = { orders, spools, preflight, jobs, settings };
+function go(t) {
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("on", b.dataset.t === t));
+  A(tabs[t]);
+}
+
+/* ---------- Заказы (из бота) ---------- */
+let OR = { orders: [], statuses: {} }, OF = "active";
+const ACTIVE = ["new", "queued", "printing"];
+async function orders() {
+  let jobs;
+  try { [OR, jobs] = await Promise.all([api("/orders"), api("/jobs")]); }
+  catch (e) {
+    $("main").innerHTML = `<div class=card><b class=bad>Не удалось получить заказы от бота</b><p>${esc(e.message)}</p><small>Проверьте, что бот запущен и в его .env есть CALC_TOKEN. Порт API бота по умолчанию 8081 (BOT_API_PORT).</small></div>`;
+    return;
+  }
+  const cost = {};
+  for (const j of jobs) if (j.order_id && j.total_cost != null) { const c = cost[j.order_id] ??= { n: 0, sum: 0 }; c.n++; c.sum += j.total_cost; }
+  const list = OR.orders.filter(o => OF === "all" || (OF === "active") === ACTIVE.includes(o.status));
+  const when = t => new Date(t.replace(" ", "T") + "Z").toLocaleString();
+  const item = o => /^https?:\/\//i.test(o.link || "") ? `<a href="${esc(o.link)}" target=_blank rel=noopener>ссылка на модель</a>` : esc(o.file_name || o.link);
+  const opt = v => `<option value=${v} ${OF === v ? "selected" : ""}>`;
+  $("main").innerHTML = `<div class=card>
+    <p><select onchange="OF=this.value;A(orders)">${opt("active")}Активные${opt("closed")}Завершённые${opt("all")}Все</select>
+    <small> Смена статуса здесь работает как кнопки в боте: клиент получает уведомление, очередь в канале обновляется.</small></p>
+    <table><tr><th>Заказ<th>Клиент<th>Что печатать<th>Цена / срок<th>Себестоимость<th>Статус</tr>
+    ${list.map(o => `<tr>
+      <td>#${o.id}<br><small>${when(o.created_at)}</small>
+      <td>${esc(o.full_name)}${o.username ? "<br><small>@" + esc(o.username) + "</small>" : ""}
+      <td>${item(o)}<br><small>${esc([o.material, o.color].filter(Boolean).join(", "))}</small>${o.comment ? "<br><small>💬 " + esc(o.comment) + "</small>" : ""}
+      <td>${esc(o.price) || "—"}<br><small>${esc(o.due)}</small>
+      <td>${cost[o.id] ? fmt(cost[o.id].sum) + `<br><small>печатей: ${cost[o.id].n}</small>` : "—"}
+      <td><select onchange="A(()=>setStatus(${o.id},this))">${Object.entries(OR.statuses).map(([k, v]) => `<option value=${k} ${k === o.status ? "selected" : ""} ${k === "new" && o.status !== "new" ? "disabled" : ""}>${esc(v)}</option>`).join("")}</select></tr>`).join("") || "<tr><td colspan=6>Заказов нет</tr>"}
+    </table></div>`;
+}
+async function setStatus(id, sel) {
+  const o = OR.orders.find(o => o.id === id), label = OR.statuses[sel.value];
+  if (!confirm(`Заказ #${id}: сменить статус на «${label}»?\nКлиент получит уведомление в Telegram.`)) { sel.value = o.status; return; }
+  try {
+    const r = await api(`/orders/${id}/status`, { method: "POST", json: { status: sel.value } });
+    if (r.channel_error) alert("Статус изменён и клиенту отправлено уведомление, но очередь в канале не обновилась: " + r.channel_error);
+  } catch (e) { sel.value = o.status; throw e; }
+  orders();
+}
+
+/* ---------- Катушки ---------- */
+async function spools() {
+  const list = (await api("/spools")).filter(s => !s.archived);
+  SP = list;
+  $("main").innerHTML = `
+  <div class=card><table>
+    <tr><th>Катушка<th>Остаток<th>Цена<th>Статус<th></tr>
+    ${list.map(s => { const [t, c] = STATUS[s.status]; return `<tr>
+      <td><span class=sw style="background:${esc(s.hex || "#999")}"></span>${esc([s.brand, s.type, s.color].join(" ").trim())}
+      <td>${fmt(s.remaining_g, 0)} из ${fmt(s.weight_g, 0)} г
+      <td>${fmt(s.price, 0)}
+      <td><span class="b ${c}">${t}</span>
+      <td><button onclick="A(()=>editSpool(${s.id}))">Изменить</button> <button onclick="A(()=>weigh(${s.id}))">Взвесить</button> <button onclick="A(()=>archive(${s.id}))">В архив</button></tr>`; }).join("") || "<tr><td colspan=5>Катушек нет. Добавьте первую ниже.</tr>"}
+  </table></div>
+  <div class=card><h2 id=sh>Добавить катушку</h2>
+  <form id=sf class=grid onsubmit="event.preventDefault();A(()=>addSpool(event.target))">
+    <input type=hidden name=id>
+    <label>Бренд<input name=brand></label>
+    <label>Тип пластика (как в слайсере)<input name=type required placeholder="PLA, PETG, TPU"></label>
+    <label>Название / цвет<input name=color placeholder="Lite White, Оранжевый"></label>
+    <label>Оттенок<input name=hex type=color value="#888888"></label>
+    <label>Вес филамента, г<input name=weight_g type=number step=any value=1000 required></label>
+    <label>Цена катушки<input name=price type=number step=any required></label>
+    <label>Остаток, г (если начата)<input name=remaining_g type=number step=any></label>
+    <button class=p id=sb>Добавить</button>
+  </form></div>`;
+}
+let SP = [];
+function editSpool(id) {
+  const s = SP.find(s => s.id === id), f = $("#sf");
+  for (const k of ["brand", "type", "color", "hex", "weight_g", "price"]) f.elements[k].value = s[k] || (k === "hex" ? "#888888" : "");
+  f.elements.id.value = id;
+  f.elements.remaining_g.value = ""; // остаток правится только кнопкой «Взвесить»
+  $("#sh").textContent = "Изменить катушку";
+  $("#sb").textContent = "Сохранить";
+  f.scrollIntoView({ behavior: "smooth" });
+}
+async function addSpool(f) {
+  const d = Object.fromEntries(new FormData(f)), id = d.id;
+  delete d.id;
+  for (const k of ["weight_g", "price", "remaining_g"]) d[k] === "" ? delete d[k] : d[k] = Number(d[k]);
+  await api(id ? "/spools/" + id : "/spools", { method: id ? "PUT" : "POST", json: d });
+  spools();
+}
+async function weigh(id) {
+  const g = prompt("Сколько граммов филамента на катушке сейчас (без самой катушки)?");
+  if (g === null || g === "") return;
+  await api("/spools/" + id, { method: "PUT", json: { remaining_g: Number(g) } });
+  spools();
+}
+async function archive(id) {
+  if (!confirm("Убрать катушку в архив? В списках она больше не появится.")) return;
+  await api("/spools/" + id, { method: "PUT", json: { archived: 1 } });
+  spools();
+}
+
+/* ---------- Проверка перед печатью ---------- */
+let P = null;
+function preflight() {
+  $("main").innerHTML = `<div class=card><h2>Проверка перед печатью</h2>
+    <p>Загрузите нарезанный файл (.gcode.3mf): покажу, хватит ли филамента на выбранных катушках.</p>
+    <input type=file accept=".3mf" onchange="A(()=>pre(this.files[0]))"></div><div id=res></div>`;
+}
+async function pre(file) {
+  if (!file) return;
+  P = await api("/preflight", { method: "POST", body: file, headers: { "X-Filename": encodeURIComponent(file.name) } });
+  $("#res").innerHTML = `<div class=card>
+    <h2>${esc(P.name)}</h2>
+    <p>Время по оценке слайсера: ${fmt(P.predictionSec / 3600, 1)} ч. Электричество примерно ${fmt(P.electricity)} ${esc(P.currency)}.</p>
+    <table><tr><th>Слот<th>Нужно (с запасом)<th>Катушка<th>Останется<th>Вердикт</tr>
+    ${P.slots.map((s, i) => `<tr>
+      <td><span class=sw style="background:${esc(s.color)}"></span>${s.slot}: ${esc(s.type)}
+      <td>${fmt(s.needG * (1 + P.safety / 100), 1)} г
+      <td>${s.candidates.length ? `<select id=sel${i} onchange="verdicts()">${s.candidates.map(c => `<option value=${c.id}>${esc(c.label)} (${fmt(c.remaining, 0)} г)</option>`).join("")}</select>` : `нет катушки типа ${esc(s.type)}`}
+      <td id=aft${i}><td id=ver${i}></tr>`).join("")}
+    </table>
+    <div class=verdict id=all></div>
+    <button class=p onclick="A(savePlan)">Запомнить выбор катушек</button>
+    <small> Выбор сработает для печати с этим именем файла.</small></div>`;
+  verdicts();
+}
+function verdicts() {
+  let worst = 0;
+  const html = ['<span class="b ok">хватает</span>', '<span class="b low">впритык</span>', '<span class="b bad">не хватает</span>'];
+  P.slots.forEach((s, i) => {
+    const sel = $("#sel" + i);
+    if (!sel) { $("#ver" + i).innerHTML = '<span class="b bad">нет катушки</span>'; worst = 2; return; }
+    const c = s.candidates.find(c => c.id == sel.value);
+    const left = c.remaining - s.needG * (1 + P.safety / 100);
+    const r = left < 0 ? 2 : left < P.low ? 1 : 0;
+    worst = Math.max(worst, r);
+    $("#aft" + i).textContent = fmt(left, 0) + " г";
+    $("#ver" + i).innerHTML = html[r];
+  });
+  $("#all").className = "verdict " + ["ok", "low", "bad"][worst];
+  $("#all").textContent = ["Можно печатать", "Хватает впритык. Взвесьте катушку перед стартом", "Филамента не хватает. Выберите другую катушку"][worst];
+}
+async function savePlan() {
+  const spools = {};
+  P.slots.forEach((s, i) => { const sel = $("#sel" + i); if (sel) spools[s.slot] = Number(sel.value); });
+  await api("/plans", { method: "POST", json: { name: P.name, spools } });
+  alert("Сохранено");
+}
+
+/* ---------- История ---------- */
+let J = [];
+async function jobs() {
+  const [list, sp] = await Promise.all([api("/jobs"), api("/spools")]);
+  J = list;
+  const act = sp.filter(s => !s.archived);
+  const when = t => t ? new Date(t).toLocaleString() : "идёт";
+  $("main").innerHTML = `<div class=card><table>
+    <tr><th>Задание<th>Время<th>г<th>кВт·ч<th>Себестоимость<th>Цена клиенту<th>Заказ<th>Катушки</tr>
+    ${list.map(j => `<tr>
+      <td>${esc(j.name)} ${j.partial ? '<span class="b low">неточно</span>' : ""} ${j.status === "FAILED" ? '<span class="b bad">брак</span>' : ""}
+      <td>${when(j.started_at)}<br><small>${j.ended_at ? fmt((j.ended_at - j.started_at - j.pause_ms) / 60000, 0) + " мин" + (j.pause_ms ? ", пауза " + fmt(j.pause_ms / 60000, 0) : "") : ""}</small>
+      <td>${fmt(j.grams, 1)}<td>${fmt(j.kwh)}<td>${fmt(j.total_cost)}<td>${fmt(j.price)}
+      <td><a href="#" onclick="A(()=>order(${j.id}));return false">${esc(j.order_id) || "указать"}</a>
+      <td>${j.spools.map(r => `${r.slot}: <select onchange="A(()=>setSpool(${j.id},${r.slot},this.value))"><option value="">не выбрана</option>${act.map(s => `<option value=${s.id} ${s.id === r.spool_id ? "selected" : ""}>${esc([s.brand, s.type, s.color].join(" ").trim())}</option>`).join("")}</select>`).join("<br>") || "<small>нет файла</small>"}</tr>`).join("") || "<tr><td>Заданий пока нет</tr>"}
+  </table></div>`;
+}
+async function order(id) {
+  const v = prompt("Номер или название заказа", J.find(j => j.id === id).order_id || "");
+  if (v === null) return;
+  await api("/jobs/" + id, { method: "PUT", json: { order_id: v } });
+  jobs();
+}
+async function setSpool(id, slot, v) {
+  await api("/jobs/" + id, { method: "PUT", json: { spools: { [slot]: v ? Number(v) : null } } });
+  jobs();
+}
+
+/* ---------- Настройки ---------- */
+const L = { printer: "Принтер", ip: "IP-адрес", serial: "Серийный номер", accessCode: "Access Code", power: "Мощность", avgWatts: "При печати, Вт", pauseWatts: "На паузе, Вт",
+  tariff: "Электричество", currency: "Валюта", zones: "Тарифные зоны (JSON: name, from, to, price)", amortPerHour: "Амортизация, за час печати", markupPercent: "Наценка, %",
+  markupFixed: "Фиксированная надбавка к цене", lowStockG: "Порог «мало», г", safetyPercent: "Запас на расход, %", fallbackPricePerKg: "Цена кг, если катушка не выбрана" };
+function fields(o, p) {
+  return Object.entries(o).map(([k, v]) => {
+    const path = p ? p + "." + k : k, name = L[k] || k;
+    if (Array.isArray(v)) return `<label class=wide>${name}<textarea data-p="${path}" data-t=j rows=7>${esc(JSON.stringify(v, null, 1))}</textarea></label>`;
+    if (v && typeof v === "object") return `<fieldset class=wide><legend>${name}</legend><div class=grid>${fields(v, path)}</div></fieldset>`;
+    const num = typeof v === "number";
+    return `<label>${name}<input data-p="${path}" data-t=${num ? "n" : "s"} ${num ? 'type=number step=any' : k === "accessCode" ? "type=password" : ""} value="${esc(v)}"></label>`;
+  }).join("");
+}
+async function settings() {
+  const s = await api("/settings");
+  $("main").innerHTML = `<div class=card><div class=grid>${fields(s, "")}</div><p><button class=p onclick="A(saveSettings)">Сохранить настройки</button>
+    <small> Новые параметры принтера применяются сразу, без перезапуска.</small></p></div>`;
+}
+async function saveSettings() {
+  const out = {};
+  document.querySelectorAll("[data-p]").forEach(el => {
+    const keys = el.dataset.p.split("."), last = keys.pop();
+    const o = keys.reduce((a, k) => a[k] ??= {}, out);
+    o[last] = el.dataset.t === "n" ? Number(el.value) : el.dataset.t === "j" ? JSON.parse(el.value) : el.value;
+  });
+  await api("/settings", { method: "PUT", json: out });
+  alert("Сохранено");
+}
+
+fetch("/version").then(r => r.json()).then(d => { $("#ver").textContent = "v" + d.version; }).catch(() => {});
+go("orders");
+</script>
+</body>
+</html>

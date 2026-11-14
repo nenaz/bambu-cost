@@ -1,0 +1,7 @@
+{
+  "token": "придумайте-длинный-пароль",
+  "port": 8080,
+  "dbPath": "./prints.db",
+  "slicedFilesDir": "./sliced",
+  "printer": { "ip": "192.168.1.50", "serial": "03900D650922622", "accessCode": "12345678" }
+}
