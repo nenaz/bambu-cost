@@ -1,17 +1,11 @@
 import type { Bootstrap, Settings } from "./config";
-import { applyCosts } from "./jobs";
+import { applyCosts, attachSlice } from "./jobs";
 import type { Db, JobRow } from "./db";
 import type { PrinterClient, PrinterState } from "./printer";
-import { pickSpool } from "./spools";
-import { findSlicedFile, readSliceInfo, type SliceInfo } from "./threeMf";
+import { stripExt } from "./threeMf";
 
 const ACTIVE = new Set(["PREPARE", "RUNNING", "PAUSE"]);
 const ENDED = new Set(["FINISH", "FAILED", "IDLE"]);
-
-function loadSlice(file: string | null): SliceInfo | null {
-  if (!file) return null;
-  try { return readSliceInfo(file); } catch (e) { console.warn("[3mf]", (e as Error).message); return null; }
-}
 
 /** Превращает смены gcode_state в задания, считает паузы, списывает катушки */
 export class JobTracker {
@@ -50,22 +44,14 @@ export class JobTracker {
   private finish(open: JobRow, status: string, s: PrinterState) {
     const cfg = this.getCfg();
     const name = open.name || s.subtask_name || "unknown";
-    const file = findSlicedFile(this.boot.slicedFilesDir, name);
-    const slice = loadSlice(file);
-    this.db.close(open.id, Date.now(), status, name, file);
-
-    if (slice) {
-      // брак: списываем пропорционально прогрессу (приблизительно)
-      const k = status === "FAILED" && s.mc_percent ? s.mc_percent / 100 : 1;
-      const plan = this.db.takePlan(name);
-      const spools = this.db.spools();
-      this.db.setJobSpools(open.id, slice.filaments.map((f) => {
-        const sp = pickSpool(f, plan?.[f.id], spools);
-        return { slot: f.id, grams: f.usedG * k, spoolId: sp?.id ?? null, perKg: sp ? (sp.price / sp.weight_g) * 1000 : null };
-      }));
-    } else console.warn(`[job ${open.id}] нет файла ${name}.gcode.3mf в ${this.boot.slicedFilesDir}: привяжите вручную или загрузите через интерфейс`);
-
-    applyCosts(this.db, cfg, open.id);
+    this.db.close(open.id, Date.now(), status, name, null);
+    // брак: списываем пропорционально прогрессу (приблизительно)
+    const k = status === "FAILED" && s.mc_percent ? s.mc_percent / 100 : 1;
+    const plan = this.db.takePlan(stripExt(name));
+    if (!attachSlice(this.db, cfg, this.boot.slicedFilesDir, open.id, plan, k)) {
+      console.warn(`[job ${open.id}] нет файла нарезки для «${name}» в ${this.boot.slicedFilesDir}: загрузите его в «Проверке перед печатью» и нажмите «Найти файл» в истории`);
+      applyCosts(this.db, cfg, open.id);
+    }
     const j = this.db.get(open.id)!;
     console.log(`[job ${j.id}] ${name} (${status}): ${j.grams?.toFixed(1) ?? "?"} г, ${j.kwh?.toFixed(2)} кВт·ч, итого ${j.total_cost?.toFixed(2)} ${cfg.tariff.currency}`);
   }

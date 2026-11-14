@@ -235,8 +235,12 @@ async function jobs() {
       <td>${when(j.started_at)}<br><small>${j.ended_at ? fmt((j.ended_at - j.started_at - j.pause_ms) / 60000, 0) + " мин" + (j.pause_ms ? ", пауза " + fmt(j.pause_ms / 60000, 0) : "") : ""}</small>
       <td>${fmt(j.grams, 1)}<td>${fmt(j.kwh)}<td>${fmt(j.total_cost)}<td>${fmt(j.price)}
       <td><a href="#" onclick="A(()=>order(${j.id}));return false">${esc(j.order_id) || "указать"}</a>
-      <td>${j.spools.map(r => `${r.slot}: <select onchange="A(()=>setSpool(${j.id},${r.slot},this.value))"><option value="">не выбрана</option>${act.map(s => `<option value=${s.id} ${s.id === r.spool_id ? "selected" : ""}>${esc([s.brand, s.type, s.color].join(" ").trim())}</option>`).join("")}</select>`).join("<br>") || "<small>нет файла</small>"}</tr>`).join("") || "<tr><td>Заданий пока нет</tr>"}
+      <td>${j.spools.map(r => `${r.slot}: <select onchange="A(()=>setSpool(${j.id},${r.slot},this.value))"><option value="">не выбрана</option>${act.map(s => `<option value=${s.id} ${s.id === r.spool_id ? "selected" : ""}>${esc([s.brand, s.type, s.color].join(" ").trim())}</option>`).join("")}</select>`).join("<br>") || (j.ended_at ? `<button onclick="A(()=>refile(${j.id}))">Найти файл</button>` : "")}</tr>`).join("") || "<tr><td>Заданий пока нет</tr>"}
   </table></div>`;
+}
+async function refile(id) {
+  await api(`/jobs/${id}/refile`, { method: "POST" });
+  jobs();
 }
 async function order(id) {
   const v = prompt("Номер или название заказа", J.find(j => j.id === id).order_id || "");

@@ -33,12 +33,13 @@ export function readSliceInfo(src: string | Buffer): SliceInfo {
   return { predictionSec: meta.prediction ? Number(meta.prediction) : null, filaments, file: typeof src === "string" ? src : "" };
 }
 
-export const stripExt = (n: string) => n.replace(/\.gcode\.3mf$/i, "").replace(/\.3mf$/i, "");
+/** Убирает .gcode.3mf / .3mf / .gcode: при повторной печати принтер присылает имя с расширением */
+export const stripExt = (n: string) => n.replace(/(\.gcode)?\.3mf$/i, "").replace(/\.gcode$/i, "");
 
 /** Ищет в папке файл по имени задания (subtask_name). Если несколько - берёт самый свежий. */
 export function findSlicedFile(dir: string, jobName: string): string | null {
   if (!jobName || !fs.existsSync(dir)) return null;
-  const want = jobName.toLowerCase();
+  const want = stripExt(jobName).toLowerCase();
   const files = fs
     .readdirSync(dir)
     .filter((n) => n.toLowerCase().endsWith(".3mf"))

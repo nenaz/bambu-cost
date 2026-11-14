@@ -3,7 +3,7 @@ import path from "node:path";
 import express from "express";
 import type { Bootstrap, Settings } from "./config";
 import type { Db, JobRow } from "./db";
-import { applyCosts } from "./jobs";
+import { applyCosts, attachSlice } from "./jobs";
 import { rankSpools, spoolStatus } from "./spools";
 import { energyCost, validateZones } from "./tariff";
 import { readSliceInfo, stripExt } from "./threeMf";
@@ -46,6 +46,14 @@ export function startServer({ boot, db, getCfg, setCfg }: Deps) {
         db.assignSpool(id, Number(slot), sp?.id ?? null, sp ? (sp.price / sp.weight_g) * 1000 : null);
       }
       applyCosts(db, getCfg(), id);
+    }
+    res.json(jobView(db.get(id)!));
+  });
+  app.post("/api/jobs/:id/refile", (q, res) => {
+    const id = Number(q.params.id), j = db.get(id);
+    if (!j?.ended_at) return res.status(404).json({ error: "Задание не найдено или ещё идёт" });
+    if (!attachSlice(db, getCfg(), boot.slicedFilesDir, id)) {
+      return res.status(404).json({ error: `Файл нарезки для «${j.name}» не найден. Загрузите его во вкладке «Проверка перед печатью» и повторите.` });
     }
     res.json(jobView(db.get(id)!));
   });

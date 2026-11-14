@@ -67,6 +67,7 @@ export class Db {
   close(id: number, endedAt: number, status: string, name: string, file: string | null) {
     this.db.prepare("UPDATE jobs SET ended_at=?, status=?, name=?, source_file=? WHERE id=?").run(endedAt, status, name, file, id);
   }
+  setSourceFile(id: number, file: string) { this.db.prepare("UPDATE jobs SET source_file = ? WHERE id = ?").run(file, id); }
   saveCosts(id: number, c: Costs) {
     this.db.prepare("UPDATE jobs SET grams=?, kwh=?, electricity_cost=?, filament_cost=?, extra_cost=?, total_cost=? WHERE id=?")
       .run(c.grams, c.kwh, c.electricity, c.filament, c.extra, c.total, id);
