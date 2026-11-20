@@ -3,7 +3,7 @@ import fs from "node:fs";
 export interface Zone { name: string; from: string; to: string; price: number }
 
 /** Минимум в config.json: то, без чего сервис не стартует */
-export interface Bootstrap { dbPath: string; port: number; token: string; slicedFilesDir: string; botUrl: string }
+export interface Bootstrap { dbPath: string; port: number; token: string; slicedFilesDir: string; botUrl: string; printerIp?: string }
 
 /** Всё остальное живёт в БД и правится из интерфейса */
 export interface Settings {
@@ -37,7 +37,7 @@ export function loadRaw(path = "config.json"): any {
 
 export function loadBootstrap(raw: any): Bootstrap {
   if (!raw.token) throw new Error("В config.json задайте непустой token: это пароль для интерфейса и бота");
-  return { dbPath: raw.dbPath ?? "./prints.db", port: raw.port ?? 8080, token: raw.token, slicedFilesDir: raw.slicedFilesDir ?? "./sliced", botUrl: String(raw.botUrl ?? "http://127.0.0.1:8081").replace(/\/$/, "") };
+  return { printerIp: raw.printer?.ip, dbPath: raw.dbPath ?? "./prints.db", port: raw.port ?? 8080, token: raw.token, slicedFilesDir: raw.slicedFilesDir ?? "./sliced", botUrl: String(raw.botUrl ?? "http://127.0.0.1:8081").replace(/\/$/, "") };
 }
 
 /** Первый запуск: подхватываем принтер и тариф из config.json (в том числе из старой версии) */

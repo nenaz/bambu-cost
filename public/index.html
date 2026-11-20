@@ -272,8 +272,12 @@ async function health() {
   await poll();
   if (!ST) throw new Error("Калькулятор не отвечает");
   const p = ST.printer, t = x => x ? new Date(x).toLocaleString() : "—";
+  const lastMqtt = !p.online && ST.issues.find(i => i.source === "mqtt" && Date.now() - i.at < 600e3);
   $("main").innerHTML = `<div class=card><h2>Состояние</h2><table>
     <tr><th>Принтер<td>${!p.configured ? '<b class=bad>не настроен (IP, серийный номер, Access Code)</b>' : p.online ? "подключён с " + t(p.since) : "<b class=bad>нет связи с " + t(p.since) + "</b>"}
+    <tr><th>Адрес принтера в настройках<td>${p.ip ? esc(p.ip) + ":8883" : "<b class=bad>не задан</b>"}${p.serial ? " · серийный номер " + esc(p.serial) : ""}
+      ${p.configFileIp && p.configFileIp !== p.ip ? `<br><b class=low>⚠️ В config.json другой IP (${esc(p.configFileIp)}), но он не используется: файл читается только при первом запуске. Меняйте адрес во вкладке <a href="#" onclick="go('settings');return false">«Настройки»</a>.</b>` : ""}
+      ${lastMqtt ? `<br><b class=bad>Последняя ошибка подключения (${t(lastMqtt.at)}): ${esc(lastMqtt.message)}</b>` : ""}
     <tr><th>Последнее сообщение принтера<td>${p.lastMessageAt ? t(p.lastMessageAt) : "ни одного с запуска сервиса"}
     <tr><th>Состояние принтера<td>${esc(p.state) || "—"} ${esc(p.subtask)}
     <tr><th>Открытое задание<td>${ST.openJob ? esc(ST.openJob.name || "?") + " с " + t(ST.openJob.started_at) : "нет"}

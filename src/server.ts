@@ -35,7 +35,10 @@ export function startServer({ boot, db, getCfg, setCfg }: Deps) {
     let freeMb: number | null = null;
     try { const s = fs.statfsSync(path.dirname(path.resolve(boot.dbPath))); freeMb = Math.round((Number(s.bavail) * Number(s.bsize)) / 1048576); } catch { /* нет данных */ }
     res.json({
-      printer: { ...status.printer, configured: !!(c.printer.ip && c.printer.serial && c.printer.accessCode) },
+      printer: {
+        ...status.printer, configured: !!(c.printer.ip && c.printer.serial && c.printer.accessCode),
+        ip: c.printer.ip, serial: c.printer.serial, configFileIp: boot.printerIp ?? null, // что в настройках и что в config.json
+      },
       db: { ...db.health(), freeMb },
       openJob: open ? { id: open.id, name: open.name, started_at: open.started_at } : null,
       issues: status.issues,
