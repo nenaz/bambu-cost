@@ -5,6 +5,7 @@ import type { Bootstrap, Settings } from "./config";
 import type { Db, JobRow } from "./db";
 import { applyCosts, attachSlice } from "./jobs";
 import { rankSpools, spoolStatus } from "./spools";
+import { status } from "./status";
 import { energyCost, validateZones } from "./tariff";
 import { readSliceInfo, stripExt } from "./threeMf";
 
@@ -27,6 +28,20 @@ export function startServer({ boot, db, getCfg, setCfg }: Deps) {
     const c = getCfg();
     return { ...j, price: j.total_cost == null ? null : j.total_cost * (1 + c.markupPercent / 100) + c.markupFixed, spools: db.jobSpools(j.id) };
   };
+
+  // --- состояние сервиса: связь с принтером, база, последние ошибки ---
+  app.get("/api/status", (_q, res) => {
+    const c = getCfg(), open = db.openJob();
+    let freeMb: number | null = null;
+    try { const s = fs.statfsSync(path.dirname(path.resolve(boot.dbPath))); freeMb = Math.round((Number(s.bavail) * Number(s.bsize)) / 1048576); } catch { /* нет данных */ }
+    res.json({
+      printer: { ...status.printer, configured: !!(c.printer.ip && c.printer.serial && c.printer.accessCode) },
+      db: { ...db.health(), freeMb },
+      openJob: open ? { id: open.id, name: open.name, started_at: open.started_at } : null,
+      issues: status.issues,
+      uptimeSec: Math.round((Date.now() - status.startedAt) / 1000),
+    });
+  });
 
   // --- задания (бот берёт отсюда себестоимость и рекомендуемую цену) ---
   app.get("/api/jobs", (_q, res) => res.json(db.list().map(jobView)));

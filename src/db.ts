@@ -45,6 +45,14 @@ export class Db {
     }
   }
 
+  /** Проверка, что база реально пишется (диск полон, карта памяти в режиме «только чтение» и т.п.) */
+  health(): { ok: boolean; error?: string } {
+    try {
+      this.db.prepare("INSERT INTO kv (key, value) VALUES ('health', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(Date.now()));
+      return { ok: true };
+    } catch (e) { return { ok: false, error: (e as Error).message }; }
+  }
+
   // --- настройки ---
   getSettings(): Partial<Settings> | undefined {
     const r = this.db.prepare("SELECT value FROM kv WHERE key='settings'").get() as unknown as { value: string } | undefined;

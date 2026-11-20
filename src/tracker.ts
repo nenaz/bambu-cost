@@ -2,6 +2,7 @@ import type { Bootstrap, Settings } from "./config";
 import { applyCosts, attachSlice } from "./jobs";
 import type { Db, JobRow } from "./db";
 import type { PrinterClient, PrinterState } from "./printer";
+import { report } from "./status";
 import { stripExt } from "./threeMf";
 
 const ACTIVE = new Set(["PREPARE", "RUNNING", "PAUSE"]);
@@ -49,6 +50,7 @@ export class JobTracker {
     const k = status === "FAILED" && s.mc_percent ? s.mc_percent / 100 : 1;
     const plan = this.db.takePlan(stripExt(name));
     if (!attachSlice(this.db, cfg, this.boot.slicedFilesDir, open.id, plan, k)) {
+      report("файл нарезки", `нет файла для «${name}» (задание #${open.id}): загрузите его в «Проверке перед печатью» и нажмите «Найти файл» в истории`);
       console.warn(`[job ${open.id}] нет файла нарезки для «${name}» в ${this.boot.slicedFilesDir}: загрузите его в «Проверке перед печатью» и нажмите «Найти файл» в истории`);
       applyCosts(this.db, cfg, open.id);
     }

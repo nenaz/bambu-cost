@@ -41,12 +41,14 @@ h2{font-size:16px;margin:0 0 10px}
 <body>
 <header>
   <b>Себестоимость печати <small id=ver></small></b>
-  <nav style="display:flex;gap:6px;flex-wrap:wrap">
+  <a id=st class=b href="#" style="margin-left:auto" onclick="go('health');return false">…</a>
+  <nav style="display:flex;gap:6px;flex-wrap:wrap;order:-1">
     <button data-t="orders" onclick="go('orders')">Заказы</button>
     <button data-t="spools" onclick="go('spools')">Катушки</button>
     <button data-t="preflight" onclick="go('preflight')">Проверка перед печатью</button>
     <button data-t="jobs" onclick="go('jobs')">История</button>
     <button data-t="settings" onclick="go('settings')">Настройки</button>
+    <button data-t="health" onclick="go('health')">Состояние</button>
   </nav>
 </header>
 <main></main>
@@ -72,7 +74,7 @@ async function api(path, o = {}) {
 }
 
 const STATUS = { ok: ["в наличии", "ok"], low: ["мало", "low"], empty: ["закончилась", "bad"] };
-const tabs = { orders, spools, preflight, jobs, settings };
+const tabs = { orders, spools, preflight, jobs, settings, health };
 function go(t) {
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("on", b.dataset.t === t));
   A(tabs[t]);
@@ -253,6 +255,35 @@ async function setSpool(id, slot, v) {
   jobs();
 }
 
+/* ---------- Состояние ---------- */
+let ST = null;
+async function poll() {
+  try { ST = await api("/status"); } catch { ST = null; }
+  const el = $("#st");
+  if (!ST) { el.className = "b bad"; el.textContent = "калькулятор не отвечает"; return; }
+  const p = ST.printer, recent = ST.issues.filter(i => Date.now() - i.at < 3600e3).length;
+  const dbBad = !ST.db.ok || (ST.db.freeMb != null && ST.db.freeMb < 200);
+  const bad = dbBad || !p.configured || !p.online;
+  el.className = "b " + (bad ? "bad" : recent ? "low" : "ok");
+  el.textContent = !ST.db.ok ? "база не записывается" : dbBad ? "мало места на диске" : !p.configured ? "принтер не настроен"
+    : !p.online ? "нет связи с принтером" : recent ? `принтер на связи, ошибок за час: ${recent}` : "принтер на связи" + (p.state ? ": " + p.state : "");
+}
+async function health() {
+  await poll();
+  if (!ST) throw new Error("Калькулятор не отвечает");
+  const p = ST.printer, t = x => x ? new Date(x).toLocaleString() : "—";
+  $("main").innerHTML = `<div class=card><h2>Состояние</h2><table>
+    <tr><th>Принтер<td>${!p.configured ? '<b class=bad>не настроен (IP, серийный номер, Access Code)</b>' : p.online ? "подключён с " + t(p.since) : "<b class=bad>нет связи с " + t(p.since) + "</b>"}
+    <tr><th>Последнее сообщение принтера<td>${p.lastMessageAt ? t(p.lastMessageAt) : "ни одного с запуска сервиса"}
+    <tr><th>Состояние принтера<td>${esc(p.state) || "—"} ${esc(p.subtask)}
+    <tr><th>Открытое задание<td>${ST.openJob ? esc(ST.openJob.name || "?") + " с " + t(ST.openJob.started_at) : "нет"}
+    <tr><th>База данных<td>${ST.db.ok ? "<span class=ok>запись работает</span>" : "<b class=bad>не записывается: " + esc(ST.db.error) + "</b>"}, свободно ${ST.db.freeMb ?? "?"} МБ
+    <tr><th>Сервис работает<td>${fmt(ST.uptimeSec / 3600, 1)} ч</table></div>
+  <div class=card><h2>Ошибки и предупреждения</h2><table><tr><th>Когда<th>Источник<th>Сообщение<th>Раз</tr>
+    ${ST.issues.map(i => `<tr><td>${t(i.at)}<td>${esc(i.source)}<td style="white-space:normal">${esc(i.message)}<td>${i.count}</tr>`).join("") || "<tr><td colspan=4>Ошибок с момента запуска нет</tr>"}
+  </table><p><small>Список хранится в памяти и очищается при перезапуске. Полный журнал: journalctl -u bambu-cost</small></p></div>`;
+}
+
 /* ---------- Настройки ---------- */
 const L = { printer: "Принтер", ip: "IP-адрес", serial: "Серийный номер", accessCode: "Access Code", power: "Мощность", avgWatts: "При печати, Вт", pauseWatts: "На паузе, Вт",
   tariff: "Электричество", currency: "Валюта", zones: "Тарифные зоны (JSON: name, from, to, price)", amortPerHour: "Амортизация, за час печати", markupPercent: "Наценка, %",
@@ -283,6 +314,8 @@ async function saveSettings() {
 }
 
 fetch("/version").then(r => r.json()).then(d => { $("#ver").textContent = "v" + d.version; }).catch(() => {});
+setInterval(poll, 15000);
+poll();
 go("orders");
 </script>
 </body>

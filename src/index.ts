@@ -2,6 +2,7 @@ import { DEFAULTS, loadBootstrap, loadRaw, seedSettings, type Settings } from ".
 import { Db } from "./db";
 import { PrinterClient } from "./printer";
 import { startServer } from "./server";
+import { report } from "./status";
 import { validateZones } from "./tariff";
 import { JobTracker } from "./tracker";
 
@@ -29,4 +30,5 @@ startServer({
   },
 });
 
+process.on("unhandledRejection", (e) => report("процесс", e));
 process.on("SIGINT", () => { printer.stop(); process.exit(0); });
